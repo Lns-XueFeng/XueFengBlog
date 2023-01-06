@@ -37,13 +37,13 @@
                     <div>
 						<div class="service_inner">
 							<ul>
-							{% for i in messageList %}
+							{% for i in message_list %}
 								<li class="wow fadeInLeft" data-wow-duration="1.5s">
 									<p style="font-size:5px">{{ i[0] }}</p>
 								<div class="inner">
 									<img class="svg" src="static/img//8.svg" alt="" />
-									<h3>{{ i[1] }}</h3>
-									<p>{{ i[2]|safe }}</p>
+									<h3>{{ i.title }}</h3>
+									<p>{{ i.body|safe }}</p>
 								</div>
 								</li>
 							{% endfor %}

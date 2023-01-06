@@ -1,16 +1,19 @@
 # pip3 freeze > requirements.txt
-import sqlite3
-from flask import Flask, render_template, request
-from flask import Markup, url_for, redirect, flash
+import os
+import re
+import random
 
-from markdown.extensions.toc import TocExtension
-import markdown, re, os, random
-
+import click
+import markdown
+# from markdown.extensions.toc import TocExtension
+from flask import Flask, render_template, request, Markup, url_for, redirect
 from flask_wtf import FlaskForm
-from flask_ckeditor import CKEditorField
+from flask_wtf.file import FileField, FileRequired, FileAllowed
 from wtforms import StringField, SubmitField
 from wtforms.validators import DataRequired
+from flask_sqlalchemy import SQLAlchemy
 from flask_ckeditor import CKEditor, CKEditorField
+
 
 app = Flask(__name__)
 
@@ -18,79 +21,24 @@ app = Flask(__name__)
 app.config['CKEDITOR_SERVE_LOCAL'] = True
 app.config['CKEDITOR_HEIGHT'] = 400
 app.secret_key = 'secret string'
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv(
+    "DATABASE_URL",
+    "sqlite:///" + os.path.join(app.root_path, "data.db")
+)
 
 ckeditor = CKEditor(app)
+db = SQLAlchemy(app)
 
 
-# 数据库操作
-def creat_table():
-    # 连接数据库(如果不存在则创建)
-    conn = sqlite3.connect('message.db')
-    # 创建游标
-    cursor = conn.cursor()
-    # 创建表
-    sql = 'CREATE TABLE "message" ("id"	INTEGER NOT NULL,"title"' \
-          '	TEXT NOT NULL,"sentence"	TEXT NOT NULL,PRIMARY KEY("id" AUTOINCREMENT))'
-    cursor.execute(sql)
-    # 提交事物
-    conn.commit()
-    # 关闭游标
-    cursor.close()
-    # 关闭连接
-    conn.close()
+class Message(db.Model):
+    """用sqlalchemy orm 代替sql来操作数据库"""
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String)
+    body = db.Column(db.Text)
 
 
-def insert_conn(title, body, table):
-    # 连接数据库(如果不存在则创建)
-    conn = sqlite3.connect('message.db')
-    # 创建游标
-    cursor = conn.cursor()
-    # 创建表
-    sql = 'insert into {}(title,sentence) values(?,?)'.format(table)
-    data = (title, body)
-    cursor.execute(sql, data)
-    # 提交事物
-    conn.commit()
-    # 关闭游标
-    cursor.close()
-    # 关闭连接
-    conn.close()
-
-
-def select_conn(table):
-    # 连接数据库(如果不存在则创建)
-    conn = sqlite3.connect('message.db')
-    # 创建游标
-    cursor = conn.cursor()
-    # sql语句
-    sql = "select * from {}".format(table)
-    valuse = cursor.execute(sql)
-    messageList = []
-    for value in valuse:
-        print(value)
-        messageList.append(value)
-    # 提交事物
-    conn.commit()
-    # 关闭游标
-    cursor.close()
-    # 关闭连接
-    conn.close()
-    return messageList
-
-
-def delete_conn(id):
-    # 连接数据库(如果不存在则创建)
-    conn = sqlite3.connect('message.db')
-    # 创建游标
-    cursor = conn.cursor()
-    # delete from 表名 where 列=?
-    cursor.execute("delete from message where id=?", (id,))  # 逗号不能省，元组元素只有一个的时候一定要加逗号,将删除lucy
-    # 提交事物
-    conn.commit()
-    # 关闭游标
-    cursor.close()
-    # 关闭连接
-    conn.close()
+class English(Message):
+    pass
 
 
 class PostForm(FlaskForm):
@@ -99,26 +47,24 @@ class PostForm(FlaskForm):
     submit = SubmitField('Submit')
 
 
-@app.route('/edit1', methods=['GET', 'POST'])
-def edit1():
-    form = PostForm()
-    if form.validate_on_submit():
-        title = form.title.data
-        body = form.body.data
-        # 将数据插入数据库
-        try:
-            insert_conn(title, body, table='message')
-        except Exception as e:
-            pass
-        # 将title与body显示在留言墙
-        return redirect(url_for("message"))
-        # return render_template('edit_post.html', title=title, body=body)
-    return render_template('edit1.html', form=form)
+class UploadForm(FlaskForm):
+    file_field = FileField(
+        "Submit",
+        validators=[FileRequired(), FileAllowed("md")]
+    )
+    submit = SubmitField("submit")
+
+
+@app.cli.command()
+def initdb():
+    db.create_all()
+    click.echo("create success!")
 
 
 # 登陆验证成功跳转文件上传
 @app.route('/login', methods=['POST', 'GET'])
 def login():
+    """用flask_login来做登录交互"""
     if request.method == 'GET':
         return render_template('login.html')
     if request.method == 'POST':
@@ -136,28 +82,39 @@ def login():
 
 
 # md文件上传
-@app.route('/upload', methods=['POST', 'GET'])
+@app.route("/upload", methods=["'POST'," "GET"])
 def upload():
-    if request.method == 'POST':
-        f = request.files['file']
-        basepath = os.path.dirname(__file__)  # 当前文件所在路径
-        upload_path = os.path.join(basepath, 'static/mdDoc/', f.filename)  # 注意：没有的文件夹一定要先创建，不然会提示没有该路径
+    upload_form = UploadForm()
+    if upload_form.validate_on_submit():
+        f = request.files["file"]
+        base_path = os.path.dirname(__file__)  # 当前文件所在路径
+        upload_path = os.path.join(base_path, "static/mdDoc/", f.filename)  # 注意：没有的文件夹一定要先创建，不然会提示没有该路径
         f.save(upload_path)
-        return redirect(url_for('upload'))
+        return redirect(url_for("upload"))
     return render_template("upload.html")
 
 
+@app.route('/edit1', methods=['GET', 'POST'])
+def edit1():
+    form = PostForm()
+    if form.validate_on_submit():
+        title = form.title.data
+        body = form.body.data
+        data = Message(title=title, body=body)
+        db.session.add(data)
+        db.session.commit()
+        return redirect(url_for("message"))
+    return render_template('edit1.html', form=form)
+
+
 # 编辑留言墙(对数据库进行操作)
-@app.route('/delete', methods=["POST", "GET"])
+@app.route("/delete", methods=["POST", "GET"])
 def delete():
     if request.method == 'POST':
         data = request.form.to_dict()
         id = data['u']
-        try:
-            delete_conn(id)
-        except:
-            pass
-        return render_template('delete.html')
+        db.session.delete(id)
+        return redirect(url_for("delete"))
     return render_template("delete.html")
 
 
@@ -168,37 +125,31 @@ def edit2():
     if form.validate_on_submit():
         title = form.title.data
         body = form.body.data
-        # 将数据插入数据库
-        try:
-            insert_conn(title, body, table='english')
-        except Exception as e:
-            pass
-        # 将title与body显示在留言墙
+        data = English(title=title, body=body)
+        db.session.add(data)
+        db.session.commit()
         return redirect(url_for("english"))
-        # return render_template('edit_post.html', title=title, body=body)
     return render_template('edit2.html', form=form)
 
 
 @app.route('/english')
 def english():
     # 查询数据库中的英语句子
-    messageList = select_conn(table='english')
-    # 将title与body显示在留言墙
-    return render_template('english.html', messageList=messageList)
+    message_list = English.query.all()
+    return render_template('english.html', message_list=message_list)
+
+
+@app.route('/talk')
+def message():
+    # 查询数据库中的留言
+    message_list = Message.query.all()
+    return render_template('message.html', message_list=message_list)
 
 
 # 上侧栏的网页们
 @app.route('/')
 def index():
     return render_template('index.html')
-
-
-@app.route('/talk')
-def message():
-    # 查询数据库中的留言
-    messageList = select_conn(table='message')
-    # 将title与body显示在留言墙
-    return render_template('message.html', messageList=messageList)
 
 
 @app.route('/visual')
@@ -246,12 +197,9 @@ def music():
     all_files = os.listdir(path)
     music_list = []
     for i in all_files:
-        try:
-            x = re.findall(r'(.*?).mp3', i)[0]
-            music_list.append(x)
-            random.shuffle(music_list)
-        except Exception as e:
-            pass
+        x = re.findall(r'(.*?).mp3', i)[0]
+        music_list.append(x)
+        random.shuffle(music_list)
     return render_template('music.html', music_list=music_list)
 
 
